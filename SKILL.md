@@ -5,7 +5,7 @@ description: Start background observation that watches your session for friction
 
 # Workflow Improvement
 
-Cron-based observation loop that periodically scans your session for friction patterns and spawns one-shot designer agents to implement improvements.
+Cron-based observation loop that periodically scans your session for friction patterns and autonomously spawns designer agents to implement improvements. Fire-and-forget — once activated, the coordinator can move on.
 
 ## Activation
 
@@ -13,10 +13,12 @@ Trigger phrases: `/workflow-improvement`, `start workflow improvement`, `watch f
 
 To stop: say `stop workflow improvement`.
 
-## What It Does
+## How It Works
 
-1. **Observer cron** — fires every 3 minutes, runs `observe` to extract friction from session logs, classifies findings, records them via `record`. If high-impact friction is found, recommends designer dispatch.
-2. **Designer subagent** — spawned on-demand for high-impact friction. Designs and implements a minimal improvement, then exits.
+1. **Observer cron** fires every 3 minutes. It tails session logs for errors/retries, classifies friction, records observations, and autonomously spawns designer agents for high-impact findings.
+2. **Designer agents** are spawned by the observer (not the coordinator). Each designs and implements one minimal improvement, then exits.
+
+The coordinator's only job is setup and teardown.
 
 ## CLI Tool
 
@@ -36,7 +38,7 @@ workflow-improve status                      # Quick status view
 
 ## Setup Procedure
 
-When invoked, execute these steps:
+When invoked, execute these 4 steps then move on:
 
 ### Step 1: Activate
 
@@ -47,10 +49,10 @@ python3 <path-to-skill>/scripts/workflow-improve.py activate
 > **How to find `<path-to-skill>`**: Search for `workflow-improve.py` under `~/.claude/skills/` or the skill's install location. The activate output includes `cli_path` — use that for all subsequent calls.
 
 This outputs JSON with:
-- `cli_path` — full path to the CLI script (use this for all subsequent calls)
-- `observer_prompt` — fully rendered observer prompt (all placeholders filled)
+- `cli_path` — full path to the CLI script (use for step 3)
+- `observer_prompt` — fully rendered observer prompt
 - `project_hash`, `state_file` — instance metadata
-- `stale_instance` — if present, a previous instance was cleaned up (CronDelete its `cron_id` first)
+- `stale_instance` — if present, CronDelete its `cron_id` first
 
 ### Step 2: Create observer cron
 
@@ -65,26 +67,14 @@ Use CronCreate:
 python3 <cli_path> set-cron-id <CRON_TASK_ID>
 ```
 
-### Step 4: Set up designer dispatch
-
-The observer's output is checked after each cron fire. If the output contains
-`DISPATCH_DESIGNER: true`, render the designer prompt:
-
-```bash
-python3 <cli_path> render-designer \
-    --observation-id '<from observer output>' \
-    --slug '<derived from title>'
-```
-
-Spawn as a background `general-purpose` agent with the rendered prompt.
-
-### Step 5: Confirm to user
+### Step 4: Confirm to user
 
 Tell the user:
-- Workflow improvement observer is running (cron every 3 min)
-- Session logs are being scanned for friction patterns
-- Designer agents will be spawned for high-impact findings
+- Workflow improvement is running (observer cron every 3 min)
+- It will autonomously detect friction and implement fixes
 - Say "stop workflow improvement" to shut down
+
+**That's it. Do not monitor cron output or manage designer dispatch — the observer handles everything autonomously.**
 
 ## Shutdown Procedure
 
@@ -96,12 +86,7 @@ When the user says "stop workflow improvement":
 python3 <cli_path> shutdown
 ```
 
-This outputs JSON with:
-- `cron_id` — use for CronDelete
-- `archived_count`, `pending_count` — observation counts
-- `session_observations` — this session's observations
-- `designs` — design docs created
-- `artifacts` — registered artifacts
+Returns JSON with `cron_id`, `archived_count`, `pending_count`, `session_observations`, `designs`, `artifacts`.
 
 ### Step 2: CronDelete
 
@@ -109,9 +94,7 @@ Use CronDelete with the `cron_id` from shutdown output.
 
 ### Step 3: Summarize to user
 
-Using the shutdown JSON, summarize:
-- Number of observations recorded (and how many archived)
-- Any designs created and improvements implemented
+Summarize: observations recorded, designs created, improvements implemented.
 
 ## Storage
 
@@ -124,10 +107,3 @@ All runtime data lives at `~/.claude/workflow-improvement/`:
 | Designs | `designs/design-{date}-{slug}.md` | Markdown + YAML frontmatter |
 | Artifacts | `artifacts.jsonl` | JSONL |
 | Instances | `instances/{project}.json` | JSON (one per active instance) |
-
-## Notes
-
-- Observer is stateless — each cron fire reads files, writes observations, exits
-- Designer is one-shot — spawned per high-impact observation, implements one fix, exits
-- All deterministic bookkeeping (file I/O, dedup, archival, ID generation) is in the CLI
-- Agents focus only on judgment: classifying friction, assessing impact, designing solutions
