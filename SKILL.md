@@ -5,7 +5,7 @@ description: Start background observation that watches your session for friction
 
 # Workflow Improvement
 
-Cron-based observation loop that periodically scans your session for friction patterns and autonomously spawns designer agents to implement improvements. Fire-and-forget — once activated, the coordinator can move on.
+Team-based observation system that watches your session for friction patterns and autonomously implements improvements. Uses Claude Code agent teams — the coordinator sets up the team, then moves on.
 
 ## Activation
 
@@ -15,30 +15,32 @@ To stop: say `stop workflow improvement`.
 
 ## How It Works
 
-1. **Observer cron** fires every 3 minutes. It tails session logs for errors/retries, classifies friction, records observations, and autonomously spawns designer agents for high-impact findings.
-2. **Designer agents** are spawned by the observer (not the coordinator). Each designs and implements one minimal improvement, then exits.
+1. Coordinator creates a `workflow-improvement` team and spawns an **Observer** agent
+2. Coordinator creates a cron that wakes the observer every 3 minutes via SendMessage
+3. Observer accumulates context across checks — spots recurring patterns, escalates persistent issues
+4. Observer spawns **Designer** agents into the team for high-impact findings
+5. Designers implement fixes, report back to observer, and exit
 
-The coordinator's only job is setup and teardown.
+The coordinator's only job is setup and teardown. The observer manages everything autonomously.
 
 ## CLI Tool
 
-All deterministic bookkeeping is handled by `scripts/workflow-improve.py`. The `--project-hash` flag is top-level and optional (defaults to cwd-derived hash).
+`scripts/workflow-improve.py` — all deterministic bookkeeping. `--project-hash` is top-level, optional.
 
 ```
 workflow-improve activate                    # Setup: render prompt, write state, return cli_path
 workflow-improve set-cron-id ID              # Save cron ID after CronCreate
-workflow-improve shutdown                    # Archive, list results, clean up
+workflow-improve shutdown                    # Archive, clean up, return cron_id
 workflow-improve observe                     # Session-digest + dedup
-workflow-improve record --category C --impact I --title T --description D  # Record observation
-workflow-improve register-artifact --file F --type T --design-id D --description D  # Register artifact
-workflow-improve update-status ID STATUS     # Update observation status
-workflow-improve render-designer --observation-id ID --slug SLUG  # Render designer prompt
+workflow-improve record --category C --impact I --title T --description D
+workflow-improve register-artifact --file F --type T --design-id D --description D
+workflow-improve update-status ID STATUS
+workflow-improve render-designer --observation-id ID --slug SLUG
 workflow-improve status                      # Quick status view
+workflow-improve report                      # Full improvement report (markdown)
 ```
 
 ## Setup Procedure
-
-When invoked, execute these 4 steps then move on:
 
 ### Step 1: Activate
 
@@ -46,55 +48,78 @@ When invoked, execute these 4 steps then move on:
 python3 <path-to-skill>/scripts/workflow-improve.py activate
 ```
 
-> **How to find `<path-to-skill>`**: Search for `workflow-improve.py` under `~/.claude/skills/` or the skill's install location. The activate output includes `cli_path` — use that for all subsequent calls.
+> Search for `workflow-improve.py` under `~/.claude/skills/` or the skill's install location. The output includes `cli_path` — use that for all subsequent calls.
 
-This outputs JSON with:
-- `cli_path` — full path to the CLI script (use for step 3)
-- `observer_prompt` — fully rendered observer prompt
-- `project_hash`, `state_file` — instance metadata
-- `stale_instance` — if present, CronDelete its `cron_id` first
+Returns: `cli_path`, `project_hash`, `team_name`, `observer_prompt`, `state_file`, and optionally `stale_instance`.
 
-### Step 2: Create observer cron
+If `stale_instance` is present, CronDelete its `cron_id` first.
 
-Use CronCreate:
-- **Expression**: `*/3 * * * *` (every 3 minutes)
-- **Prompt**: The `observer_prompt` value from Step 1
+### Step 2: Create team
+
+Use TeamCreate:
+- **team_name**: the `team_name` from activate output (`workflow-improvement`)
+- **description**: "Watches session for friction and implements improvements"
+
+### Step 3: Spawn observer
+
+Use the Agent tool to spawn the observer:
+- **team_name**: `workflow-improvement`
+- **name**: `observer`
+- **subagent_type**: `general-purpose`
+- **run_in_background**: true
+- **prompt**: the `observer_prompt` from Step 1
+
+### Step 4: Create wake-up cron
+
+Use CronCreate to periodically wake the observer:
+- **Expression**: `*/3 * * * *`
 - **Recurring**: true
+- **Prompt**: `"Send a message to the observer in the workflow-improvement team telling it to run its periodic observation check."`
 
-### Step 3: Save cron ID
-
+Save the cron ID:
 ```bash
 python3 <cli_path> set-cron-id <CRON_TASK_ID>
 ```
 
-### Step 4: Confirm to user
+### Step 5: Confirm to user
 
 Tell the user:
-- Workflow improvement is running (observer cron every 3 min)
-- It will autonomously detect friction and implement fixes
-- Say "stop workflow improvement" to shut down
+- Workflow improvement team is active with an observer agent
+- Checks run every 3 minutes, designer agents spawn for high-impact findings
+- Say "stop workflow improvement" to shut down and see results
 
-**That's it. Do not monitor cron output or manage designer dispatch — the observer handles everything autonomously.**
+**Done. Do not monitor the team — the observer manages everything.**
 
 ## Shutdown Procedure
 
-When the user says "stop workflow improvement":
+### Step 1: Generate report
 
-### Step 1: Get shutdown data
+```bash
+python3 <cli_path> report
+```
+
+This outputs a markdown summary of all observations, improvements, and artifacts.
+
+### Step 2: Shut down observer
+
+Send a shutdown request to the observer via SendMessage (`type: "shutdown_request"`, `recipient: "observer"`).
+
+### Step 3: Clean up state
 
 ```bash
 python3 <cli_path> shutdown
 ```
 
-Returns JSON with `cron_id`, `archived_count`, `pending_count`, `session_observations`, `designs`, `artifacts`.
+Returns `cron_id` and `team_name` for cleanup.
 
-### Step 2: CronDelete
+### Step 4: Clean up resources
 
-Use CronDelete with the `cron_id` from shutdown output.
+1. CronDelete with the `cron_id` from shutdown output
+2. TeamDelete to remove the team
 
-### Step 3: Summarize to user
+### Step 5: Present report
 
-Summarize: observations recorded, designs created, improvements implemented.
+Show the user the report from Step 1.
 
 ## Storage
 

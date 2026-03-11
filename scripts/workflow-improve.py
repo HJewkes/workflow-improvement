@@ -16,6 +16,8 @@ DIGEST_SCRIPT = SCRIPT_DIR / "session-digest.py"
 OBSERVER_TEMPLATE = SKILL_DIR / "references" / "observer.md"
 DESIGNER_TEMPLATE = SKILL_DIR / "references" / "designer.md"
 
+TEAM_NAME = "workflow-improvement"
+
 
 def project_hash(cwd):
     return cwd.replace("/", "-")
@@ -105,11 +107,13 @@ def cmd_activate(args):
     observer_prompt = render_template(OBSERVER_TEMPLATE, {
         "PROJECT_HASH": phash,
         "WORKFLOW_IMPROVE_PATH": cli_path,
+        "TEAM_NAME": TEAM_NAME,
     })
 
-    # Write state file (cron_id filled later by agent after CronCreate)
+    # Write state file
     state = {
         "cron_id": None,
+        "team_name": TEAM_NAME,
         "session_id": session_id,
         "project": cwd,
         "project_hash": phash,
@@ -120,6 +124,7 @@ def cmd_activate(args):
     result = {
         "cli_path": cli_path,
         "project_hash": phash,
+        "team_name": TEAM_NAME,
         "state_file": str(state_file),
         "observer_prompt": observer_prompt,
     }
@@ -142,7 +147,7 @@ def cmd_set_cron_id(args):
 
 
 def cmd_shutdown(args):
-    """Archive resolved observations, list designs/artifacts, delete state."""
+    """Archive resolved observations, delete state. Returns cron_id for cleanup."""
     phash = get_phash(args)
     state_file = INSTANCES / f"{phash}.json"
 
@@ -165,24 +170,14 @@ def cmd_shutdown(args):
             append_jsonl(archive_file, item)
     write_jsonl(pending_file, remaining)
 
-    # Session observations — from full pre-archive list (includes items just archived)
-    session_obs = pending
-    if state and state.get("session_id"):
-        session_obs = [o for o in pending if o.get("session") == state["session_id"]]
-
-    designs = [f.name for f in sorted(DESIGNS.glob("*.md"))] if DESIGNS.exists() else []
-    artifacts = read_jsonl(ARTIFACTS)
-
     if state_file.exists():
         state_file.unlink()
 
     print(json.dumps({
         "cron_id": cron_id,
+        "team_name": TEAM_NAME,
         "archived_count": len(to_archive),
         "pending_count": len(remaining),
-        "session_observations": session_obs,
-        "designs": designs,
-        "artifacts": artifacts,
     }, indent=2))
 
 
@@ -299,13 +294,90 @@ def cmd_status(args):
     }, indent=2))
 
 
+def cmd_report(args):
+    """Generate a clean report of all improvements made."""
+    phash = get_phash(args)
+    pending_file = OBSERVATIONS / phash / "pending.jsonl"
+    archive_file = OBSERVATIONS / phash / "archive.jsonl"
+
+    pending = read_jsonl(pending_file)
+    archived = read_jsonl(archive_file)
+    all_obs = pending + archived
+    artifacts = read_jsonl(ARTIFACTS)
+
+    # Load design docs
+    designs = []
+    if DESIGNS.exists():
+        for f in sorted(DESIGNS.glob("*.md")):
+            designs.append({"file": f.name, "path": str(f)})
+
+    # Group observations by status
+    by_status = {}
+    for o in all_obs:
+        s = o.get("status", "unknown")
+        by_status.setdefault(s, []).append(o)
+
+    # Build report
+    lines = ["# Workflow Improvement Report", ""]
+
+    # Summary
+    addressed = by_status.get("addressed", [])
+    dismissed = by_status.get("dismissed", [])
+    still_pending = by_status.get("pending", [])
+    lines.append(f"**{len(all_obs)} observations** total: "
+                 f"{len(addressed)} addressed, {len(dismissed)} dismissed, "
+                 f"{len(still_pending)} pending")
+    lines.append(f"**{len(designs)} designs** created, **{len(artifacts)} artifacts** produced")
+    lines.append("")
+
+    # Improvements implemented
+    if addressed:
+        lines.append("## Improvements Implemented")
+        lines.append("")
+        for o in addressed:
+            design = o.get("design_id", "")
+            lines.append(f"- **{o['title']}** ({o['category']}, {o['date']})")
+            lines.append(f"  {o['description']}")
+            if design:
+                lines.append(f"  Design: `{design}`")
+            lines.append("")
+
+    # Artifacts
+    if artifacts:
+        lines.append("## Artifacts Created")
+        lines.append("")
+        for a in artifacts:
+            lines.append(f"- `{a['file']}` — {a['description']} (design: `{a.get('design_id', '?')}`)")
+        lines.append("")
+
+    # Still pending
+    if still_pending:
+        lines.append("## Pending Observations")
+        lines.append("")
+        for o in still_pending:
+            lines.append(f"- [{o['impact']}] **{o['title']}** ({o['category']})")
+            if o.get("suggestion"):
+                lines.append(f"  Suggestion: {o['suggestion']}")
+        lines.append("")
+
+    # Dismissed
+    if dismissed:
+        lines.append("## Dismissed")
+        lines.append("")
+        for o in dismissed:
+            lines.append(f"- ~~{o['title']}~~ ({o['category']}, {o['impact']})")
+        lines.append("")
+
+    report = "\n".join(lines)
+    print(report)
+
+
 def cmd_render_designer(args):
     """Render designer prompt. Looks up observation by ID from pending.jsonl."""
     phash = get_phash(args)
     cwd = args.cwd or os.getcwd()
     cli_path = str(SCRIPT_DIR / "workflow-improve.py")
 
-    # Look up observation from pending
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
     obs = None
     for item in read_jsonl(pending_file):
@@ -325,6 +397,7 @@ def cmd_render_designer(args):
         "SLUG": args.slug,
         "WORKFLOW_IMPROVE_PATH": cli_path,
         "PROJECT_HASH": phash,
+        "TEAM_NAME": TEAM_NAME,
     })
     print(prompt)
 
@@ -340,35 +413,36 @@ def main():
     p = sub.add_parser("set-cron-id")
     p.add_argument("cron_id")
 
-    p = sub.add_parser("shutdown")
+    sub.add_parser("shutdown")
 
     p = sub.add_parser("observe")
     p.add_argument("--since", type=int, help="Minutes to look back (default 5)")
 
     p = sub.add_parser("record")
-    p.add_argument("--category", required=True, help="failed-tool|repetition|manual-step|error-loop|missing-capability|slow-pattern|documentation-gap")
-    p.add_argument("--impact", required=True, help="high|medium|low")
-    p.add_argument("--title", required=True, help="Short description (<80 chars)")
-    p.add_argument("--description", required=True, help="What happened")
-    p.add_argument("--suggestion", default=None, help="Fix suggestion (optional)")
+    p.add_argument("--category", required=True)
+    p.add_argument("--impact", required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--description", required=True)
+    p.add_argument("--suggestion", default=None)
 
     p = sub.add_parser("register-artifact")
-    p.add_argument("--file", required=True, help="Relative file path")
-    p.add_argument("--type", required=True, help="created|modified")
-    p.add_argument("--design-id", required=True, help="Associated design ID")
-    p.add_argument("--description", required=True, help="What the artifact does")
+    p.add_argument("--file", required=True)
+    p.add_argument("--type", required=True)
+    p.add_argument("--design-id", required=True)
+    p.add_argument("--description", required=True)
 
     p = sub.add_parser("update-status")
     p.add_argument("obs_id")
-    p.add_argument("status", help="pending|in-design|addressed|dismissed|duplicate")
-    p.add_argument("--design-id", help="Link to design ID")
+    p.add_argument("status")
+    p.add_argument("--design-id")
 
-    p = sub.add_parser("status")
+    sub.add_parser("status")
+    sub.add_parser("report")
 
     p = sub.add_parser("render-designer")
-    p.add_argument("--observation-id", required=True, help="Observation ID to look up")
-    p.add_argument("--slug", required=True, help="Design slug")
-    p.add_argument("--cwd", help="Override working directory")
+    p.add_argument("--observation-id", required=True)
+    p.add_argument("--slug", required=True)
+    p.add_argument("--cwd")
 
     args = ap.parse_args()
     {
@@ -380,6 +454,7 @@ def main():
         "register-artifact": cmd_register_artifact,
         "update-status": cmd_update_status,
         "status": cmd_status,
+        "report": cmd_report,
         "render-designer": cmd_render_designer,
     }[args.command](args)
 
