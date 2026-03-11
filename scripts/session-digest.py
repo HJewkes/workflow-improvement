@@ -25,13 +25,14 @@ def parse_ts(ts_str):
     except ValueError:
         return None
 
-def digest(path, lines=500, since_minutes=None):
+def digest(path, lines=500, since_minutes=None, after_ts=None):
     raw = tail_lines(path, lines)
     cutoff = (datetime.now(timezone.utc).timestamp() - since_minutes * 60) if since_minutes else None
     tool_map, errors, retries = {}, [], []
     tool_counts = defaultdict(int)
     prev_tool, consecutive, timestamps = None, 0, []
     turn_count, error_count, session_id = 0, 0, None
+    last_ts = None
 
     def flush_retry():
         nonlocal prev_tool, consecutive
@@ -48,12 +49,15 @@ def digest(path, lines=500, since_minutes=None):
         ts = parse_ts(entry.get("timestamp"))
         if cutoff and ts and ts.timestamp() < cutoff:
             continue
+        if after_ts and ts and ts <= after_ts:
+            continue
         if not session_id:
             session_id = entry.get("sessionId", "")
         t = entry.get("type")
         ts_short = ts.strftime("%H:%M:%S") if ts else "?"
         if ts:
             timestamps.append(ts_short)
+            last_ts = ts
         if t == "assistant":
             turn_count += 1
             for b in entry.get("message", {}).get("content", []):
@@ -87,6 +91,7 @@ def digest(path, lines=500, since_minutes=None):
     return {
         "session": (session_id or "?")[:8],
         "period": {"start": timestamps[0] if timestamps else "?", "end": timestamps[-1] if timestamps else "?"},
+        "last_seen": last_ts.isoformat() if last_ts else None,
         "turns": turn_count, "errors": errors, "retries": retries,
         "stats": {"tool_counts": dict(tool_counts), "error_rate": round(error_count / total, 3) if total else 0},
     }
@@ -111,6 +116,7 @@ def main():
     ap.add_argument("--project", help="Filter to project hash (with --latest)")
     ap.add_argument("--lines", type=int, default=500, help="Tail N lines (default 500)")
     ap.add_argument("--since", type=int, help="Only entries from last N minutes")
+    ap.add_argument("--after", help="Only entries after this ISO timestamp")
     ap.add_argument("--json", action="store_true", dest="json_out", help="JSON output")
     args = ap.parse_args()
     if args.latest:
@@ -123,7 +129,10 @@ def main():
         ap.print_help(); sys.exit(1)
     if not path.exists():
         print(f"Log not found: {path}", file=sys.stderr); sys.exit(1)
-    d = digest(path, lines=args.lines, since_minutes=args.since)
+    after_ts = None
+    if args.after:
+        after_ts = parse_ts(args.after)
+    d = digest(path, lines=args.lines, since_minutes=args.since, after_ts=after_ts)
     if not d["turns"] and not d["errors"]:
         print("No activity found"); sys.exit(0)
     print(json.dumps(d, indent=2) if args.json_out else fmt_text(d))
