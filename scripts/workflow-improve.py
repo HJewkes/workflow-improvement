@@ -118,14 +118,12 @@ def cmd_activate(args):
     }
     state_file.write_text(json.dumps(state, indent=2))
 
-    result = {
+    print(json.dumps({
         "cli_path": cli_path,
         "project_hash": phash,
         "team_name": TEAM_NAME,
-        "state_file": str(state_file),
         "observer_prompt": observer_prompt,
-    }
-    print(json.dumps(result, indent=2))
+    }, indent=2))
 
 
 def cmd_set_cron_id(args):
