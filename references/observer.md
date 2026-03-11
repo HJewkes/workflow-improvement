@@ -76,6 +76,10 @@ python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} render-designer \
 
 For medium/low observations, just note them and go idle.
 
+## Important: Minimize chatter
+
+After processing observations, go idle silently. Do NOT send a response message back to the coordinator. The only exception is if you spawn a designer agent — briefly note which observation triggered it, nothing more.
+
 ## Shutdown
 
 When you receive a shutdown request, approve it immediately.
