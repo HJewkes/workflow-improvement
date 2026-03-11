@@ -11,7 +11,7 @@ On first launch, create your wake-up cron and save its ID:
 1. Use **CronCreate**:
    - `cron`: `"*/3 * * * *"`
    - `recurring`: true
-   - `prompt`: `"Run this command and check the output:\n\npython3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} observe\n\nIf the JSON output has non-empty digest.errors OR non-empty digest.retries, send the full JSON output as a message to the observer in the {TEAM_NAME} team. Otherwise do nothing."`
+   - `prompt`: `"Run python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} observe and process the results per your instructions."`
 
 2. Save the cron ID:
 ```bash
@@ -22,10 +22,10 @@ Then go idle and wait for messages.
 
 ## On Each Wake-Up
 
-You will receive messages containing the JSON output from the observe command. The coordinator
-only sends messages when friction is detected, so every wake-up has real work to do.
+Run the observe command from the cron prompt. Parse its JSON output — it contains
+`digest` (errors, retries, tool stats), `existing_count`, and `existing_titles`.
 
-Parse the JSON. It contains `digest` (errors, retries, tool stats), `existing_count`, and `existing_titles`.
+If `digest.errors` and `digest.retries` are both empty, go idle silently.
 
 ### 1. Classify friction (YOUR JUDGMENT)
 
