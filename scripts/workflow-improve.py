@@ -179,9 +179,22 @@ def cmd_shutdown(args):
 def cmd_observe(args):
     """Run session-digest and deduplicate against existing observations."""
     phash = get_phash(args)
-    since = args.since or 5
+    cursor_file = OBSERVATIONS / phash / "cursor.json"
 
-    cmd = [sys.executable, str(DIGEST_SCRIPT), "--latest", f"--project={phash}", "--since", str(since), "--json"]
+    # Read cursor (last-seen timestamp)
+    cursor = {}
+    if cursor_file.exists():
+        try:
+            cursor = json.loads(cursor_file.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    cmd = [sys.executable, str(DIGEST_SCRIPT), "--latest", f"--project={phash}", "--json"]
+    if cursor.get("last_seen"):
+        cmd.extend(["--after", cursor["last_seen"]])
+    else:
+        cmd.extend(["--since", str(args.since or 5)])
+
     r = subprocess.run(cmd, capture_output=True, text=True)
 
     if r.returncode != 0:
@@ -193,6 +206,12 @@ def cmd_observe(args):
     except json.JSONDecodeError:
         print(json.dumps({"digest": {"errors": [], "retries": []}, "existing_titles": [], "digest_error": "invalid JSON from session-digest"}))
         sys.exit(0)
+
+    # Update cursor
+    if digest.get("last_seen"):
+        cursor["last_seen"] = digest["last_seen"]
+        cursor_file.parent.mkdir(parents=True, exist_ok=True)
+        cursor_file.write_text(json.dumps(cursor))
 
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
     existing = read_jsonl(pending_file)
