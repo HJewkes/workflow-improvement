@@ -216,14 +216,14 @@ def cmd_observe(args):
     r = subprocess.run(cmd, capture_output=True, text=True)
 
     if r.returncode != 0:
-        print(json.dumps({"digest": {"errors": [], "retries": []}, "existing_titles": [], "digest_error": r.stderr.strip()}))
-        sys.exit(0)
+        print("No friction detected.")
+        return
 
     try:
         digest = json.loads(r.stdout)
     except json.JSONDecodeError:
-        print(json.dumps({"digest": {"errors": [], "retries": []}, "existing_titles": [], "digest_error": "invalid JSON from session-digest"}))
-        sys.exit(0)
+        print("No friction detected.")
+        return
 
     # Update cursor
     if digest.get("last_seen"):
@@ -231,15 +231,37 @@ def cmd_observe(args):
         cursor_file.parent.mkdir(parents=True, exist_ok=True)
         cursor_file.write_text(json.dumps(cursor))
 
+    errors = digest.get("errors", [])
+    retries = digest.get("retries", [])
+
+    if not errors and not retries:
+        print("No friction detected.")
+        return
+
+    # Filter out already-recorded observations
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
     existing = read_jsonl(pending_file)
     existing_titles = {o.get("title", "").lower() for o in existing}
 
-    print(json.dumps({
-        "digest": digest,
-        "existing_count": len(existing),
-        "existing_titles": sorted(existing_titles),
-    }, indent=2))
+    lines = [f"Friction detected ({len(errors)} errors, {len(retries)} retries):"]
+    lines.append("")
+
+    if errors:
+        lines.append("ERRORS:")
+        for e in errors:
+            lines.append(f"  [{e.get('time', '?')}] {e.get('tool', '?')}: {e.get('message', '')}")
+        lines.append("")
+
+    if retries:
+        lines.append("RETRIES:")
+        for r in retries:
+            lines.append(f"  [{r.get('time', '?')}] {r.get('tool', '?')} x{r.get('count', '?')}")
+        lines.append("")
+
+    if existing_titles:
+        lines.append(f"Already recorded ({len(existing_titles)}): {', '.join(sorted(existing_titles))}")
+
+    print("\n".join(lines))
 
 
 def cmd_record(args):

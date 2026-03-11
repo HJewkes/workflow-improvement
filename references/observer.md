@@ -22,10 +22,9 @@ Then go idle and wait for messages.
 
 ## On Each Wake-Up
 
-Run the observe command from the cron prompt. Parse its JSON output — it contains
-`digest` (errors, retries, tool stats), `existing_count`, and `existing_titles`.
+Run the observe command from the cron prompt. If the output says "No friction detected", go idle silently.
 
-If `digest.errors` and `digest.retries` are both empty, go idle silently.
+Otherwise it lists errors and retries to classify. It also lists already-recorded titles to avoid duplicates.
 
 ### 1. Classify friction (YOUR JUDGMENT)
 
