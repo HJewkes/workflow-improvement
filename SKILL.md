@@ -20,15 +20,8 @@ Follow these steps exactly. All bash commands are copy-paste ready.
 ### Step 1: Activate
 
 ```bash
-python3 ~/.claude/skills/workflow-improvement/scripts/workflow-improve.py activate
+python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py activate
 ```
-
-If the command above fails (file not found), find the correct path:
-```bash
-find ~/.claude/skills -name "workflow-improve.py" 2>/dev/null
-find .claude/skills -name "workflow-improve.py" 2>/dev/null
-```
-Then re-run `activate` using the discovered path.
 
 Parse the JSON output. You need these fields:
 - `cli_path` — use this exact path in all subsequent bash commands
