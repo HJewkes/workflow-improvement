@@ -90,12 +90,9 @@ def cmd_activate(args):
     session_id = str(uuid.uuid4())
     cli_path = str(SCRIPT_DIR / "workflow-improve.py")
 
-    # Check for stale instance
+    # Clean up stale instance (crons are session-scoped, no cleanup needed)
     state_file = INSTANCES / f"{phash}.json"
-    stale_info = None
     if state_file.exists():
-        stale = json.loads(state_file.read_text())
-        stale_info = {"cron_id": stale.get("cron_id"), "started_at": stale.get("started_at")}
         state_file.unlink()
 
     # Ensure directories
@@ -128,8 +125,6 @@ def cmd_activate(args):
         "state_file": str(state_file),
         "observer_prompt": observer_prompt,
     }
-    if stale_info:
-        result["stale_instance"] = stale_info
     print(json.dumps(result, indent=2))
 
 

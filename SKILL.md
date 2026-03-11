@@ -27,7 +27,6 @@ Parse the JSON output. You need these fields:
 - `cli_path` — use this exact path for all CLI commands (setup and shutdown)
 - `observer_prompt` — use this as the prompt when spawning the observer agent
 - `team_name` — use this for TeamCreate and Agent spawn
-- `stale_instance` — if present, its `cron_id` needs CronDelete before continuing
 
 ### Step 2: Create team and spawn observer
 
