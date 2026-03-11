@@ -85,10 +85,7 @@ def cmd_activate(args):
     # Render observer prompt
     workflow_improve_path = str(SCRIPT_DIR / "workflow-improve.py")
     observer_prompt = render_template(OBSERVER_TEMPLATE, {
-        "CWD": cwd,
         "PROJECT_HASH": phash,
-        "DATE": date,
-        "SESSION_ID": session_id,
         "WORKFLOW_IMPROVE_PATH": workflow_improve_path,
     })
 
@@ -208,36 +205,52 @@ def cmd_observe(args):
     existing = read_jsonl(pending_file)
     existing_titles = {o.get("title", "").lower() for o in existing}
 
-    # Compute next observation ID
-    existing_ids = [o.get("id", "") for o in existing]
-    date = datetime.now().strftime("%Y-%m-%d")
-    max_seq = 0
-    for oid in existing_ids:
-        parts = oid.split("-")
-        if len(parts) >= 4:
-            try:
-                max_seq = max(max_seq, int(parts[-1]))
-            except ValueError:
-                pass
-
     result = {
         "digest": digest,
         "existing_count": len(existing),
         "existing_titles": sorted(existing_titles),
-        "next_seq": max_seq + 1,
-        "date": date,
         "pending_file": str(pending_file),
     }
     print(json.dumps(result, indent=2))
 
 
 def cmd_record(args):
-    """Append an observation to pending.jsonl."""
-    obs = json.loads(args.obs_json)
-    phash = obs.get("project", "").replace("/", "-") or args.project_hash or project_hash(os.getcwd())
+    """Append an observation to pending.jsonl. Fills in deterministic fields from instance state."""
+    phash = args.project_hash or project_hash(os.getcwd())
+    state_file = INSTANCES / f"{phash}.json"
+    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    # Compute next sequence number
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
+    existing = read_jsonl(pending_file)
+    max_seq = 0
+    for o in existing:
+        parts = o.get("id", "").split("-")
+        if len(parts) >= 4:
+            try:
+                max_seq = max(max_seq, int(parts[-1]))
+            except ValueError:
+                pass
+    seq = max_seq + 1
+
+    obs = {
+        "id": f"obs-{date}-{seq:03d}",
+        "session": state.get("session_id", ""),
+        "project": state.get("project", os.getcwd()),
+        "date": date,
+        "category": args.category,
+        "impact": args.impact,
+        "title": args.title,
+        "description": args.description,
+        "suggestion": args.suggestion,
+        "status": "pending",
+        "related": [],
+        "design_id": None,
+    }
     append_jsonl(pending_file, obs)
-    print(f"Recorded {obs.get('id', '?')} to {pending_file}")
+    print(json.dumps({"recorded": obs["id"], "file": str(pending_file)}))
 
 
 def cmd_register_artifact(args):
@@ -319,8 +332,12 @@ def main():
     p.add_argument("--project-hash", help="Override project hash")
     p.add_argument("--since", type=int, help="Minutes to look back (default 5)")
 
-    p = sub.add_parser("record", help="Append an observation to pending.jsonl")
-    p.add_argument("obs_json", help="Observation JSON string")
+    p = sub.add_parser("record", help="Record an observation (deterministic fields auto-filled)")
+    p.add_argument("--category", required=True, help="failed-tool|repetition|manual-step|error-loop|missing-capability|slow-pattern|documentation-gap")
+    p.add_argument("--impact", required=True, help="high|medium|low")
+    p.add_argument("--title", required=True, help="Short description (<80 chars)")
+    p.add_argument("--description", required=True, help="What happened")
+    p.add_argument("--suggestion", default=None, help="Fix suggestion (optional)")
     p.add_argument("--project-hash", help="Override project hash")
 
     p = sub.add_parser("register-artifact", help="Append an artifact to artifacts.jsonl")

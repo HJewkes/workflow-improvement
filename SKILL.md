@@ -27,7 +27,7 @@ workflow-improve activate          # Setup: env discovery, stale cleanup, render
 workflow-improve set-cron-id ID    # Save cron ID to state file after CronCreate
 workflow-improve shutdown          # Archive observations, list results, clean up state
 workflow-improve observe           # Run session-digest + deduplicate against existing
-workflow-improve record 'JSON'     # Append observation to pending.jsonl
+workflow-improve record --category C --impact I --title T --description D  # Record observation (id/session/date auto-filled)
 workflow-improve register-artifact 'JSON'  # Append to artifacts.jsonl
 workflow-improve update-status ID STATUS   # Update observation status
 workflow-improve render-designer --observation-json 'JSON' --observation-id ID --slug SLUG

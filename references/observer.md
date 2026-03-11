@@ -5,24 +5,21 @@ current Claude Code session. You are stateless — use the CLI for all file I/O,
 judgment only for classification, and exit.
 
 ## Your Environment
-- Working directory: {CWD}
-- CLI tool: {WORKFLOW_IMPROVE_PATH}
-- Project hash: {PROJECT_HASH}
+- CLI: `python3 {WORKFLOW_IMPROVE_PATH}`
+- Project: `{PROJECT_HASH}`
 
 ## Procedure
 
 ### 1. Get new friction signals
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} observe --project-hash {PROJECT_HASH}
+python3 {WORKFLOW_IMPROVE_PATH} observe --project-hash={PROJECT_HASH}
 ```
 
 This returns JSON with:
 - `digest` — session-digest output (errors, retries, tool stats)
 - `existing_count` — number of existing observations
 - `existing_titles` — titles already recorded (for dedup)
-- `next_seq` — next sequence number for observation IDs
-- `date` — today's date
 - `pending_file` — path to pending.jsonl
 
 If `digest.errors` and `digest.retries` are both empty, output "No friction detected" and exit.
@@ -43,18 +40,24 @@ Decide:
 For each classified friction, call:
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} record '{"id": "obs-{DATE}-NNN", "session": "{SESSION_ID}", "project": "{CWD}", "date": "{DATE}", "category": "<category>", "impact": "<impact>", "title": "<title>", "description": "<description>", "suggestion": "<suggestion>", "status": "pending", "related": [], "design_id": null}'
+python3 {WORKFLOW_IMPROVE_PATH} record \
+    --category "<category>" \
+    --impact "<impact>" \
+    --title "<title>" \
+    --description "<description>" \
+    --suggestion "<suggestion>" \
+    --project-hash={PROJECT_HASH}
 ```
 
-Use `next_seq` from step 1 for the NNN sequence number, incrementing for each observation.
+The CLI auto-generates the observation ID, session, project, date, and status fields.
 
 ### 4. Assess for designer dispatch
 
-If any new observation has `"impact": "high"`, output:
+If any new observation has `"impact": "high"`, use the `recorded` ID from the CLI output and emit:
 
 ```
 DISPATCH_DESIGNER: true
-OBSERVATION_ID: obs-{DATE}-NNN
+OBSERVATION_ID: <recorded id from CLI>
 TITLE: <title>
 SUGGESTION: <suggestion>
 ```
