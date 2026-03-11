@@ -7,7 +7,7 @@ Use the CLI for all bookkeeping; focus your effort on judgment and implementatio
 ## Your Environment
 - Working directory: {CWD}
 - Observation to address: {OBSERVATION_JSON}
-- CLI tool: {WORKFLOW_IMPROVE_PATH}
+- CLI: `python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH}`
 
 ## Procedure
 
@@ -23,7 +23,7 @@ Is this worth fixing? Consider:
 
 If not worth fixing:
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} update-status {OBSERVATION_ID} dismissed
+python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} update-status {OBSERVATION_ID} dismissed
 ```
 Exit with a brief explanation.
 
@@ -60,13 +60,17 @@ project: {CWD}
 ### 6. Register artifacts
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} register-artifact '{"file": "<relative-path>", "type": "created", "design_id": "design-{DATE}-{SLUG}", "date": "{DATE}", "project": "{CWD}", "auto_generated": true, "description": "<what it does>"}'
+python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} register-artifact \
+    --file "<relative-path>" \
+    --type "created" \
+    --design-id "design-{DATE}-{SLUG}" \
+    --description "<what it does>"
 ```
 
 ### 7. Update statuses
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} update-status {OBSERVATION_ID} addressed --design-id design-{DATE}-{SLUG}
+python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} update-status {OBSERVATION_ID} addressed --design-id design-{DATE}-{SLUG}
 ```
 
 Then update the design doc frontmatter: set `status: implemented` and fill `artifacts` list.

@@ -13,14 +13,13 @@ judgment only for classification, and exit.
 ### 1. Get new friction signals
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} observe --project-hash={PROJECT_HASH}
+python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} observe
 ```
 
 This returns JSON with:
 - `digest` — session-digest output (errors, retries, tool stats)
 - `existing_count` — number of existing observations
 - `existing_titles` — titles already recorded (for dedup)
-- `pending_file` — path to pending.jsonl
 
 If `digest.errors` and `digest.retries` are both empty, output "No friction detected" and exit.
 
@@ -40,13 +39,12 @@ Decide:
 For each classified friction, call:
 
 ```bash
-python3 {WORKFLOW_IMPROVE_PATH} record \
+python3 {WORKFLOW_IMPROVE_PATH} --project-hash={PROJECT_HASH} record \
     --category "<category>" \
     --impact "<impact>" \
     --title "<title>" \
     --description "<description>" \
-    --suggestion "<suggestion>" \
-    --project-hash={PROJECT_HASH}
+    --suggestion "<suggestion>"
 ```
 
 The CLI auto-generates the observation ID, session, project, date, and status fields.
