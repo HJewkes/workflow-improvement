@@ -23,6 +23,8 @@ Follow these steps exactly. All bash commands are copy-paste ready.
 python3 ~/.claude/skills/workflow-improvement/scripts/workflow-improve.py activate
 ```
 
+If the path above doesn't work, see [references/setup-help.md](references/setup-help.md) to locate your install.
+
 Parse the JSON output. You need these fields:
 - `cli_path` — use this exact path in all subsequent bash commands
 - `observer_prompt` — use this as the prompt when spawning the observer agent
