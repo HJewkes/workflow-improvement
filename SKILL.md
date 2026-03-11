@@ -24,7 +24,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py activate
 ```
 
 Parse the JSON output. You need these fields:
-- `cli_path` — use this exact path in all subsequent bash commands
+- `cli_path` — use this exact path for all CLI commands (setup and shutdown)
 - `observer_prompt` — use this as the prompt when spawning the observer agent
 - `team_name` — use this for TeamCreate and Agent spawn
 - `stale_instance` — if present, its `cron_id` needs CronDelete before continuing
@@ -42,19 +42,9 @@ Do these two things:
    - `run_in_background`: true
    - `prompt`: the `observer_prompt` value from step 1 (paste the entire string)
 
-### Step 3: Create wake-up cron and save its ID
+The observer will create its own wake-up cron and save the cron ID.
 
-Use **CronCreate**:
-- `cron`: `"*/3 * * * *"`
-- `recurring`: true
-- `prompt`: `"Send a message to the observer in the workflow-improvement team telling it to run its periodic observation check now."`
-
-Then save the returned cron ID:
-```bash
-python3 <cli_path from step 1> set-cron-id <CRON_ID>
-```
-
-### Step 4: Confirm to user
+### Step 3: Confirm to user
 
 Tell the user workflow improvement is active, then **stop — do not monitor the team**.
 
