@@ -15,35 +15,18 @@ To stop: say `stop workflow improvement`.
 
 ## Setup Procedure
 
-Follow these steps exactly. All bash commands are copy-paste ready.
+### Step 1: Create team and spawn observer
 
-### Step 1: Activate
-
-```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py activate
-```
-
-Parse the JSON output. You need these fields:
-- `cli_path` — use this exact path for all CLI commands (setup and shutdown)
-- `observer_prompt` — use this as the prompt when spawning the observer agent
-- `team_name` — use this for TeamCreate and Agent spawn
-
-### Step 2: Create team and spawn observer
-
-Do these two things:
-
-1. **TeamCreate** with `team_name` from step 1 and description `"Watches session for friction and implements improvements"`
+1. **TeamCreate** with name `"workflow-improvement"` and description `"Watches session for friction and implements improvements"`
 
 2. **Agent tool** to spawn the observer:
-   - `team_name`: the `team_name` from step 1
+   - `team_name`: the team name from TeamCreate
    - `name`: `"observer"`
    - `subagent_type`: `"general-purpose"`
    - `run_in_background`: true
-   - `prompt`: the `observer_prompt` value from step 1 (paste the entire string)
+   - `prompt`: `"Run python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py observer-init and follow its output exactly."`
 
-The observer will create its own wake-up cron and save the cron ID.
-
-### Step 3: Confirm to user
+### Step 2: Confirm to user
 
 Tell the user workflow improvement is active, then **stop — do not monitor the team**.
 
@@ -54,8 +37,8 @@ When the user says "stop workflow improvement":
 ### Step 1: Report and archive
 
 ```bash
-python3 <cli_path> report
-python3 <cli_path> shutdown
+python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py report
+python3 ${CLAUDE_SKILL_DIR}/scripts/workflow-improve.py shutdown
 ```
 
 The `report` command outputs a markdown summary. The `shutdown` command returns JSON with `cron_id` for cleanup.

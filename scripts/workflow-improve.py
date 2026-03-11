@@ -15,6 +15,7 @@ ARTIFACTS = BASE / "artifacts.jsonl"
 DIGEST_SCRIPT = SCRIPT_DIR / "session-digest.py"
 OBSERVER_TEMPLATE = SKILL_DIR / "references" / "observer.md"
 DESIGNER_TEMPLATE = SKILL_DIR / "references" / "designer.md"
+PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 TEAM_NAME = "workflow-improvement"
 
@@ -25,6 +26,12 @@ def project_hash(cwd):
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def find_latest_log(phash):
+    """Find the most recently modified session log for this project."""
+    logs = list(PROJECTS_DIR.glob(f"{phash}/*.jsonl"))
+    return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
 
 
 def render_template(template_path, variables):
@@ -83,14 +90,27 @@ def get_phash(args):
     return args.project_hash or project_hash(os.getcwd())
 
 
-def cmd_activate(args):
-    """Setup: discover env, check stale, mkdir, render prompt, write state."""
-    cwd = args.cwd or os.getcwd()
+def get_state(phash):
+    """Load instance state file."""
+    state_file = INSTANCES / f"{phash}.json"
+    if not state_file.exists():
+        return {}
+    return json.loads(state_file.read_text())
+
+
+def save_state(phash, state):
+    """Write instance state file."""
+    state_file = INSTANCES / f"{phash}.json"
+    state_file.write_text(json.dumps(state, indent=2))
+
+
+def cmd_observer_init(args):
+    """Full observer setup: init state, lock session log, output operating instructions."""
+    cwd = os.getcwd()
     phash = project_hash(cwd)
-    session_id = str(uuid.uuid4())
     cli_path = str(SCRIPT_DIR / "workflow-improve.py")
 
-    # Clean up stale instance (crons are session-scoped, no cleanup needed)
+    # Clean up stale instance
     state_file = INSTANCES / f"{phash}.json"
     if state_file.exists():
         state_file.unlink()
@@ -100,55 +120,47 @@ def cmd_activate(args):
     DESIGNS.mkdir(parents=True, exist_ok=True)
     INSTANCES.mkdir(parents=True, exist_ok=True)
 
-    # Render observer prompt
-    observer_prompt = render_template(OBSERVER_TEMPLATE, {
-        "PROJECT_HASH": phash,
-        "WORKFLOW_IMPROVE_PATH": cli_path,
-        "TEAM_NAME": TEAM_NAME,
-    })
+    # Lock current session log
+    session_log = find_latest_log(phash)
+    session_log_path = str(session_log) if session_log else None
 
     # Write state file
     state = {
         "cron_id": None,
         "team_name": TEAM_NAME,
-        "session_id": session_id,
         "project": cwd,
         "project_hash": phash,
+        "session_log": session_log_path,
         "started_at": now_iso(),
     }
-    state_file.write_text(json.dumps(state, indent=2))
+    save_state(phash, state)
 
-    print(json.dumps({
-        "cli_path": cli_path,
-        "project_hash": phash,
-        "team_name": TEAM_NAME,
-        "observer_prompt": observer_prompt,
-    }, indent=2))
+    # Render and output observer operating instructions
+    prompt = render_template(OBSERVER_TEMPLATE, {
+        "PROJECT_HASH": phash,
+        "WORKFLOW_IMPROVE_PATH": cli_path,
+        "TEAM_NAME": TEAM_NAME,
+    })
+    print(prompt)
 
 
 def cmd_set_cron_id(args):
     """Update state file with cron ID after CronCreate."""
     phash = get_phash(args)
-    state_file = INSTANCES / f"{phash}.json"
-    if not state_file.exists():
+    state = get_state(phash)
+    if not state:
         print("No active instance", file=sys.stderr)
         sys.exit(1)
-    state = json.loads(state_file.read_text())
     state["cron_id"] = args.cron_id
-    state_file.write_text(json.dumps(state, indent=2))
+    save_state(phash, state)
     print(f"Updated cron_id to {args.cron_id}")
 
 
 def cmd_shutdown(args):
     """Archive resolved observations, delete state. Returns cron_id for cleanup."""
     phash = get_phash(args)
-    state_file = INSTANCES / f"{phash}.json"
-
-    state = None
-    cron_id = None
-    if state_file.exists():
-        state = json.loads(state_file.read_text())
-        cron_id = state.get("cron_id")
+    state = get_state(phash)
+    cron_id = state.get("cron_id")
 
     # Archive observations with terminal statuses
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
@@ -163,6 +175,7 @@ def cmd_shutdown(args):
             append_jsonl(archive_file, item)
     write_jsonl(pending_file, remaining)
 
+    state_file = INSTANCES / f"{phash}.json"
     if state_file.exists():
         state_file.unlink()
 
@@ -175,8 +188,9 @@ def cmd_shutdown(args):
 
 
 def cmd_observe(args):
-    """Run session-digest and deduplicate against existing observations."""
+    """Run session-digest against locked session log, deduplicate against existing observations."""
     phash = get_phash(args)
+    state = get_state(phash)
     cursor_file = OBSERVATIONS / phash / "cursor.json"
 
     # Read cursor (last-seen timestamp)
@@ -187,7 +201,13 @@ def cmd_observe(args):
         except json.JSONDecodeError:
             pass
 
-    cmd = [sys.executable, str(DIGEST_SCRIPT), "--latest", f"--project={phash}", "--json"]
+    # Use locked session log from state, fall back to latest
+    session_log = state.get("session_log")
+    if session_log and Path(session_log).exists():
+        cmd = [sys.executable, str(DIGEST_SCRIPT), session_log, "--json"]
+    else:
+        cmd = [sys.executable, str(DIGEST_SCRIPT), "--latest", f"--project={phash}", "--json"]
+
     if cursor.get("last_seen"):
         cmd.extend(["--after", cursor["last_seen"]])
     else:
@@ -225,8 +245,7 @@ def cmd_observe(args):
 def cmd_record(args):
     """Record an observation. Deterministic fields auto-filled from instance state."""
     phash = get_phash(args)
-    state_file = INSTANCES / f"{phash}.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    state = get_state(phash)
 
     date = datetime.now().strftime("%Y-%m-%d")
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
@@ -234,7 +253,6 @@ def cmd_record(args):
 
     obs = {
         "id": f"obs-{date}-{seq:03d}",
-        "session": state.get("session_id", ""),
         "project": state.get("project", os.getcwd()),
         "date": date,
         "category": args.category,
@@ -253,8 +271,7 @@ def cmd_record(args):
 def cmd_register_artifact(args):
     """Register an artifact produced by a designer agent."""
     phash = get_phash(args)
-    state_file = INSTANCES / f"{phash}.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    state = get_state(phash)
 
     artifact = {
         "file": args.file,
@@ -292,13 +309,13 @@ def cmd_update_status(args):
 def cmd_status(args):
     """Quick status view."""
     phash = get_phash(args)
-    state_file = INSTANCES / f"{phash}.json"
+    state = get_state(phash)
     pending_file = OBSERVATIONS / phash / "pending.jsonl"
     archive_file = OBSERVATIONS / phash / "archive.jsonl"
 
     print(json.dumps({
-        "active": state_file.exists(),
-        "instance": json.loads(state_file.read_text()) if state_file.exists() else None,
+        "active": bool(state),
+        "instance": state or None,
         "pending_observations": len(read_jsonl(pending_file)),
         "archived_observations": len(read_jsonl(archive_file)),
         "designs": len(list(DESIGNS.glob("*.md"))) if DESIGNS.exists() else 0,
@@ -332,7 +349,6 @@ def cmd_report(args):
     # Build report
     lines = ["# Workflow Improvement Report", ""]
 
-    # Summary
     addressed = by_status.get("addressed", [])
     dismissed = by_status.get("dismissed", [])
     still_pending = by_status.get("pending", [])
@@ -342,7 +358,6 @@ def cmd_report(args):
     lines.append(f"**{len(designs)} designs** created, **{len(artifacts)} artifacts** produced")
     lines.append("")
 
-    # Improvements implemented
     if addressed:
         lines.append("## Improvements Implemented")
         lines.append("")
@@ -354,7 +369,6 @@ def cmd_report(args):
                 lines.append(f"  Design: `{design}`")
             lines.append("")
 
-    # Artifacts
     if artifacts:
         lines.append("## Artifacts Created")
         lines.append("")
@@ -362,7 +376,6 @@ def cmd_report(args):
             lines.append(f"- `{a['file']}` — {a['description']} (design: `{a.get('design_id', '?')}`)")
         lines.append("")
 
-    # Still pending
     if still_pending:
         lines.append("## Pending Observations")
         lines.append("")
@@ -372,7 +385,6 @@ def cmd_report(args):
                 lines.append(f"  Suggestion: {o['suggestion']}")
         lines.append("")
 
-    # Dismissed
     if dismissed:
         lines.append("## Dismissed")
         lines.append("")
@@ -380,8 +392,7 @@ def cmd_report(args):
             lines.append(f"- ~~{o['title']}~~ ({o['category']}, {o['impact']})")
         lines.append("")
 
-    report = "\n".join(lines)
-    print(report)
+    print("\n".join(lines))
 
 
 def cmd_render_designer(args):
@@ -419,8 +430,7 @@ def main():
     ap.add_argument("--project-hash", help="Override project hash (default: derived from cwd)")
     sub = ap.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("activate")
-    p.add_argument("--cwd", help="Override working directory")
+    sub.add_parser("observer-init")
 
     p = sub.add_parser("set-cron-id")
     p.add_argument("cron_id")
@@ -458,7 +468,7 @@ def main():
 
     args = ap.parse_args()
     {
-        "activate": cmd_activate,
+        "observer-init": cmd_observer_init,
         "set-cron-id": cmd_set_cron_id,
         "shutdown": cmd_shutdown,
         "observe": cmd_observe,
